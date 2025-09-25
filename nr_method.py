@@ -34,12 +34,19 @@ class NRMethod:
             })
         
         self.tl_details = pd.DataFrame({
-            'From': ['Allen', 'Betty','Allen', 'Doug', 'Doug', 'Clyde'],
-            'To': ['Betty', 'Eve', 'Doug', 'Eve', 'Clyde', 'Eve'],
+            'From': ['Allen-0', 'Betty-1','Allen-0', 'Doug-3', 'Doug-3', 'Clyde-2'],
+            'To': ['Betty-1', 'Eve-4', 'Doug-3', 'Eve-4', 'Clyde-2', 'Eve-4'],
             'Rse': [0.009,0.006,0.007,0.006,0.011,0.010],
             'Xse': [0.041,0.037,0.055,0.045,0.061,0.051],
             'MVA': [125,250, 200,125,80,75]
             })
+        
+        self.conn_map = {'1': [2, 4],
+                         '2': [1,5],
+                         '3': [4,5],
+                         '4': [1,3,5],
+                         '5': [2,3,4]
+                         }
 
     def round_complex(self, num):
         '''
@@ -57,34 +64,90 @@ class NRMethod:
         ang = round(np.angle(num, deg=True), 3)
         return mag, ang
     
-    def y_bus (self):
+    def calc_admittances (self):
         '''
         Called in main. 
             - Create the Y bus matrix. A fundamental part of the NR solution
             - Create the polar and rectangular forms of the Y values. Makes it easier to process later.
         '''
-        self.y = {'Y_complex':[], 'Y_magnitude':[], 'Y_angle':[]}
+        y = {'Y_complex':[], 'Y_magnitude':[], 'Y_angle':[]}
         for index, row in self.tl_details.iterrows():
             r = row['Rse']
             x = row['Xse']
             z = complex(r,x)
-            # y = 1/z
-            y = self.round_complex(num=1/z)
-            y_mag, y_ang = self.rect_polar(num=y)
-            self.y['Y_complex'].append(y)
-            self.y['Y_magnitude'].append(y_mag)
-            self.y['Y_angle'].append(y_ang)
+            y_comp = self.round_complex(num=1/z)
+            y_mag, y_ang = self.rect_polar(num=y_comp)
+            y['Y_complex'].append(y_comp)
+            y['Y_magnitude'].append(y_mag)
+            y['Y_angle'].append(y_ang)
         # concatenate self.y into self.tl_details
-        self.tl_details = pd.concat([self.tl_details, pd.DataFrame(self.y)], axis=1)
+        self.tl_details_conc = pd.concat([self.tl_details, pd.DataFrame(y)], axis=1)
 
-    def output_vector(self):
-        y = sp.symbols(f"theta1:{len(self.data)+1}")
-        theta_vec = sp.Matrix(y)
-        print(theta_vec)
+    def unknown_vector(self):
+        '''
+        Called in main. Creating the output vector, containing the voltage and the
+        angle vectors for each unknown bus.
+        '''
+        
+        unknown = sp.symbols(f"P1 theta2 theta3 theta4 theta5")
+        unknown_vec = sp.Matrix(unknown)
+        return unknown_vec
+    
+    def known_vector(self):
+        known = sp.symbols("delta2 delta3 delta4 delta5 V3 V4 V5")
+        known_vec = sp.Matrix(known)
+        return known_vec
+    
+    def create_ybus_matrix(self):
+        n = len(self.tl_details_conc)
+        ybus = np.zeros((5,5), dtype=complex)
+        for r in self.tl_details_conc.itertuples():
+            i = int(r.From.split('-')[-1])
+            j = int(r.To.split('-')[-1])
+            yij = r.Y_complex
+            # print(f'{i}\t{j}\t{yij}')
+            # print(-yij)
+            ybus[i,j] -= yij
+            ybus[j,i] -= yij
+            ybus[i,i] += yij
+            ybus[j,j] += yij
+        
+        # print(f'ybus shape {ybus.shape}\n\nybus:\n\n {ybus}\n\ncompressed ybus:\n\n{csc_matrix(ybus)}')
+        self.ybus = ybus
         
         pass
+    def output_vector(self):
+        '''
+        Called in main. Creating the output vector, containing the voltage and the
+        angle vectors for each unknown bus.
+        
+        
+        '''
+        
+        y = sp.symbols(f"theta1:{len(self.data)+1}")
+        theta_vec = sp.Matrix(y)
+        print(self.tl_details_conc)
     
-    
+    def rem (self):
+        
+        # for key, value in self.conn_map.items():
+        #     print(f"{key}\t{value}")
+        ybus_symbols = []
+        for index, row in self.tl_details_conc.iterrows():
+            if index + 1 <= len(self.conn_map):
+                # print(self.conn_map[str(index+1)])
+                for to in self.conn_map[str(index+1)]:
+                    
+                    ybus_symbols.append(f"Y_{index+1}{to}")
+                    
+                # print(row['From'].split('-')[-1])
+                # print(f"{self.conn_map[str(index+1)]}\t{row['From'].split('-')[-1]}")
+                if row['From'].split('-')[-1] in self.conn_map[str(index+1)]:
+                    print(f"{self.conn_map[str(index+1)]}\t{row['From']}")
+                # self.conn_map[str(index+1)]
+        print(ybus_symbols)
 nr = NRMethod()
-nr.y_bus()
-nr.output_vector()
+nr.calc_admittances()
+nr.create_ybus_matrix()
+# nr.output_vector()
+# nr.rem()
